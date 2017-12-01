@@ -29,17 +29,20 @@ message Config {
 	// Pow config
 	PowConfig pow = 3;
 
+	// DPoS config
+	DPoSConfig dpos = 4;	
+
 	// Storage config
-	StorageConfig storage = 4;
+	StorageConfig storage = 5;
 
 	// Account manager config
-	AccountConfig account = 5;
+	AccountConfig account = 6;
 
 	// Influxdb config
-	Influxdb influxdb = 6;
+	Influxdb influxdb = 7;
 
 	// Metrics config
-	Metrics metrics = 7;
+	Metrics metrics = 8;
 	// TODO: more configs.
 }
 
@@ -73,6 +76,11 @@ message RPCConfig {
 
 message PowConfig {
 	// pow miner's coinbase
+	string coinbase = 1;
+}
+
+message DPoSConfig {
+	// dpos miner's coinbase
 	string coinbase = 1;
 }
 
