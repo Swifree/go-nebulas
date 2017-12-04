@@ -1,8 +1,8 @@
 # Sample non-seed testing node config.
 
 p2p {
-  port: 10000
-  seed: "/ip4/192.168.1.13/tcp/51413/ipfs/QmPyr4ZbDmwF1nWxymTktdzspcBFPL6X1v3Q5nT7PGNtUN"
+  port: 10001
+  seed: "/ip4/192.168.1.22/tcp/51410/ipfs/QmPyr4ZbDmwF1nWxymTktdzspcBFPL6X1v3Q5nT7PGNtUN"
   chain_id: 100
   version: 1
 }
@@ -10,7 +10,7 @@ p2p {
 rpc {
   api_port: 51511
   management_port: 52521
-  api_http_port: 8090
+  api_http_port: 8091
   management_http_port: 8191
 }
 
@@ -18,8 +18,12 @@ pow {
   coinbase: "8a209cec02cbeab7e2f74ad969d2dfe8dd24416aa65589bf"
 }
 
+dpos {
+  coinbase: "3e9f008b7feb2cb867004edf1bcc441788516ad40e853d2d"
+}
+
 storage {
-  location: "normal.db"
+  location: "normal.1.db"
 }
 
 account {

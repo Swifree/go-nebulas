@@ -6,7 +6,7 @@
 
 p2p {
   # seed: "UNCOMMENT_AND_SET_SEED_NODE_ADDRESS"
-  port: 51413
+  port: 51410
   chain_id: 100
   version: 1
 }
@@ -15,10 +15,14 @@ rpc {
   api_port: 51510
   management_port: 52520
   api_http_port: 8090
-  management_http_port: 8191
+  management_http_port: 8190
 }
 
 pow {
+  coinbase: "8a209cec02cbeab7e2f74ad969d2dfe8dd24416aa65589bf"
+}
+
+dpos {
   coinbase: "8a209cec02cbeab7e2f74ad969d2dfe8dd24416aa65589bf"
 }
 
