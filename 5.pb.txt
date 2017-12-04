@@ -1,0 +1,34 @@
+# Neb configuration text file. Scheme is defined in neblet/pb/config.proto:Config.
+#
+# Non-seed node needs to set the p2p seed node address. Example value looks like
+# "/ip4/192.168.1.18/tcp/51413/ipfs/QmVMamgHNoR8GBUbq4r9BTFzod5F2BvhSgaGLVxPpXcWNm"
+#
+
+network {
+  # seed: "UNCOMMENT_AND_SET_SEED_NODE_ADDRESS"
+  seed: ["/ip4/192.168.1.22/tcp/51413/ipfs/QmPyr4ZbDmwF1nWxymTktdzspcBFPL6X1v3Q5nT7PGNtUN"]
+  listen: 10005
+}
+
+chain {
+  chain_id: 100
+  datadir: "normal.db5"
+  keydir: "keydir"
+  coinbase: "13a8135878d2e25e277b9821c17c0bd0e759f66e0cf1266d"
+  signature_ciphers: [0]
+}
+
+rpc {
+    rpc_listen: 51516
+    http_listen: 8096
+}
+
+stats {
+    enable_metrics: false
+    influxdb: {
+        host: "http://localhost:8086"
+        db: "nebulas"
+        user: "admin"
+        password: "admin"
+    }
+}

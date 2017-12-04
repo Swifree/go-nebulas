@@ -468,8 +468,6 @@ func (block *Block) verifyHash(chainID uint32) error {
 // verifyState return state verify result.
 func (block *Block) verifyState() error {
 	// verify state root.
-	log.Info(block.accState.RootHash())
-	log.Info(block.StateRoot())
 	if !byteutils.Equal(block.accState.RootHash(), block.StateRoot()) {
 		return ErrInvalidBlockStateRoot
 	}

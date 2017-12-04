@@ -79,7 +79,7 @@ func (n *Neblet) Start() error {
 		return err
 	}
 
-	storage, err := storage.NewDiskStorage(n.config.GetStorage().Location)
+	storage, err := storage.NewDiskStorage(n.config.Chain.Datadir)
 	// storage, err := storage.NewMemoryStorage()
 	if err != nil {
 		return err
@@ -105,7 +105,7 @@ func (n *Neblet) Start() error {
 	n.snycManager = nsync.NewManager(n.blockChain, n.consensus, n.netService)
 
 	n.apiServer = rpc.NewAPIServer(n)
-	n.managementServer = rpc.NewManagementServer(n)
+	// n.managementServer = rpc.NewManagementServer(n)
 
 	// start.
 	err = n.netService.Start()
@@ -118,10 +118,10 @@ func (n *Neblet) Start() error {
 	n.snycManager.Start()
 	go n.apiServer.Start()
 	go n.apiServer.RunGateway()
-	go n.managementServer.Start()
-	go n.managementServer.RunGateway()
+	// go n.managementServer.Start()
+	// go n.managementServer.RunGateway()
 
-	if n.config.Metrics.Enable {
+	if n.config.Stats.EnableMetrics {
 		go metrics.Start(n)
 	}
 
@@ -161,7 +161,7 @@ func (n *Neblet) Stop() error {
 		n.managementServer = nil
 	}
 
-	if n.config.Metrics.Enable {
+	if n.config.Stats.EnableMetrics {
 		metrics.Stop()
 	}
 

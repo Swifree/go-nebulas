@@ -74,11 +74,7 @@ func NewDpos(neblet Neblet) (*Dpos, error) {
 		canMining: false,
 	}
 
-	cfg := neblet.Config().Dpos
-	if cfg == nil {
-		return nil, ErrMissingConfigForDpos
-	}
-	coinbase, err := core.AddressParse(cfg.GetCoinbase())
+	coinbase, err := core.AddressParse(neblet.Config().Chain.Coinbase)
 	if err != nil {
 		log.WithFields(log.Fields{
 			"err": err,

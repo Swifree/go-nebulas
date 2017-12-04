@@ -51,6 +51,7 @@ var (
 	ErrDuplicatedBlock             = errors.New("duplicated block")
 	ErrInvalidAddress              = errors.New("address: invalid address")
 	ErrInvalidAddressDataLength    = errors.New("address: invalid address data length")
+	ErrOutofGasLimit               = errors.New("out of gas limit")
 )
 
 // TxPayload stored in tx

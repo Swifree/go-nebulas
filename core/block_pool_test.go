@@ -28,7 +28,6 @@ import (
 	"github.com/nebulasio/go-nebulas/crypto/keystore/secp256k1"
 	"github.com/nebulasio/go-nebulas/storage"
 	"github.com/nebulasio/go-nebulas/util"
-	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -58,25 +57,23 @@ func TestBlockPool(t *testing.T) {
 	key, _ := ks.GetUnlocked(from.ToHex())
 	signature, _ := crypto.NewSignature(keystore.SECP256K1)
 	signature.InitSign(key.(keystore.PrivateKey))
-	log.Info(bc.tailBlock.accState.RootHash())
 	bc.tailBlock.begin()
-	bc.tailBlock.accState.GetOrCreateUserAccount(from.Bytes()).AddBalance(util.NewUint128FromInt(100000))
+	bc.tailBlock.accState.GetOrCreateUserAccount(from.Bytes()).AddBalance(util.NewUint128FromInt(1000000))
+	bc.tailBlock.header.stateRoot = bc.tailBlock.accState.RootHash()
 	bc.tailBlock.commit()
-	log.Info(bc.tailBlock.accState.RootHash())
-	bc.cachedBlocks.ContainsOrAdd(bc.tailBlock.Hash().Hex(), bc.tailBlock)
+	bc.storeBlockToStorage(bc.tailBlock)
 
 	validators, _ := TraverseDynasty(bc.tailBlock.dposContext.dynastyTrie)
 
 	block0 := NewBlock(0, &Address{validators[1]}, bc.tailBlock)
-	log.Info(block0.accState.RootHash())
 	block0.header.timestamp = bc.tailBlock.header.timestamp + BlockInterval
 	block0.Seal()
 
-	tx1 := NewTransaction(0, from, to, util.NewUint128FromInt(1), 1, TxPayloadBinaryType, []byte("nas"), TransactionGasPrice, TransactionGas)
+	tx1 := NewTransaction(0, from, to, util.NewUint128FromInt(1), 1, TxPayloadBinaryType, []byte("nas"), TransactionGasPrice, util.NewUint128FromInt(200000))
 	tx1.Sign(signature)
-	tx2 := NewTransaction(0, from, to, util.NewUint128FromInt(2), 2, TxPayloadBinaryType, []byte("nas"), TransactionGasPrice, TransactionGas)
+	tx2 := NewTransaction(0, from, to, util.NewUint128FromInt(2), 2, TxPayloadBinaryType, []byte("nas"), TransactionGasPrice, util.NewUint128FromInt(200000))
 	tx2.Sign(signature)
-	tx3 := NewTransaction(0, from, to, util.NewUint128FromInt(3), 3, TxPayloadBinaryType, []byte("nas"), TransactionGasPrice, TransactionGas)
+	tx3 := NewTransaction(0, from, to, util.NewUint128FromInt(3), 3, TxPayloadBinaryType, []byte("nas"), TransactionGasPrice, util.NewUint128FromInt(200000))
 	tx3.Sign(signature)
 	err = bc.txPool.Push(tx1)
 	assert.NoError(t, err)
