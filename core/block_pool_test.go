@@ -65,7 +65,7 @@ func TestBlockPool(t *testing.T) {
 
 	validators, _ := TraverseDynasty(bc.tailBlock.dposContext.dynastyTrie)
 
-	block0 := NewBlock(0, &Address{validators[1]}, bc.tailBlock)
+	block0, _ := NewBlock(0, &Address{validators[1]}, bc.tailBlock)
 	block0.header.timestamp = bc.tailBlock.header.timestamp + BlockInterval
 	block0.Seal()
 
@@ -82,22 +82,22 @@ func TestBlockPool(t *testing.T) {
 	err = bc.txPool.Push(tx3)
 	assert.NoError(t, err)
 
-	block1 := NewBlock(0, &Address{validators[2]}, block0)
+	block1, _ := NewBlock(0, &Address{validators[2]}, block0)
 	block1.header.timestamp = block0.header.timestamp + BlockInterval
 	block1.CollectTransactions(1)
 	block1.Seal()
 
-	block2 := NewBlock(0, &Address{validators[3]}, block1)
+	block2, _ := NewBlock(0, &Address{validators[3]}, block1)
 	block2.header.timestamp = block1.header.timestamp + BlockInterval
 	block2.CollectTransactions(1)
 	block2.Seal()
 
-	block3 := NewBlock(0, &Address{validators[4]}, block2)
+	block3, _ := NewBlock(0, &Address{validators[4]}, block2)
 	block3.header.timestamp = block2.header.timestamp + BlockInterval
 	block3.CollectTransactions(1)
 	block3.Seal()
 
-	block4 := NewBlock(0, &Address{validators[5]}, block3)
+	block4, _ := NewBlock(0, &Address{validators[5]}, block3)
 	block4.header.timestamp = block3.header.timestamp + BlockInterval
 	block4.CollectTransactions(1)
 	block4.Seal()

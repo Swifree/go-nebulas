@@ -88,16 +88,8 @@ func NewManager(neblet Neblet) *Manager {
 		if conf.SignatureCiphers[0] > 0 {
 			m.signatureAlg = keystore.Algorithm(conf.SignatureCiphers[0])
 		}
-
-		// if conf.GetSignature() > 0 {
-		// 	m.signatureAlg = keystore.Algorithm(conf.GetSignature())
-		// }
-		// if conf.GetEncrypt() > 0 {
-		// 	m.encryptAlg = keystore.Algorithm(conf.GetEncrypt())
-		// }
-
-		m.refreshAccounts()
 	}
+	m.refreshAccounts()
 	return m
 }
 

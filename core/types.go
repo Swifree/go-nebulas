@@ -52,6 +52,7 @@ var (
 	ErrInvalidAddress              = errors.New("address: invalid address")
 	ErrInvalidAddressDataLength    = errors.New("address: invalid address data length")
 	ErrOutofGasLimit               = errors.New("out of gas limit")
+	ErrDoubleSealBlock             = errors.New("cannot seal a block twice")
 )
 
 // TxPayload stored in tx
