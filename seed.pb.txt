@@ -14,6 +14,8 @@ chain {
   datadir: "seed.db"
   keydir: "keydir"
   coinbase: "9341709022928b38dae1f9e1cfbad25611e81f736fd192c5"
+  miner: "9341709022928b38dae1f9e1cfbad25611e81f736fd192c5"
+  passphrase: "passphrase"
   signature_ciphers: [0]
 }
 
