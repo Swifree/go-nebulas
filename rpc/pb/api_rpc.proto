@@ -146,7 +146,14 @@ service APIService {
             post: "/v1/admin/transactionWithPassphrase"
             body: "*"
         };
-    }
+	}
+	
+	// GetDynasty
+	rpc GetDynasty (GetDynastyRequest) returns (GetDynastyResponse) {
+		option (google.api.http) = {
+			get: "/v1/admin/dynasty"
+		};
+	}
 
 }
 
@@ -258,6 +265,14 @@ message GetAccountStateResponse {
 	// Current transaction count.
 	string nonce = 2;
 }
+
+// Request message of GetDynastyRequest rpc.
+message GetDynastyRequest {}
+
+// Response message of GetDynastyRequest rpc
+message GetDynastyResponse {
+	repeated string delegatees = 1;
+}	
 
 // Request message of SendTransaction rpc.
 message SendTransactionRequest {

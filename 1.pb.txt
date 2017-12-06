@@ -14,8 +14,8 @@ chain {
   chain_id: 100
   datadir: "normal.db1"
   keydir: "keydir"
-  coinbase: "0dae13b7d3db400b0513514ffa6cdc62fdba109cff037b84"
-  miner: "0dae13b7d3db400b0513514ffa6cdc62fdba109cff037b84"
+  coinbase: "1a263547d167c74cf4b8f9166cfa244de0481c514a45aa2c"
+  miner: "1a263547d167c74cf4b8f9166cfa244de0481c514a45aa2c"
   passphrase: "passphrase"
   signature_ciphers: [0]
 }
