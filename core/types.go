@@ -69,5 +69,6 @@ const (
 
 // Consensus interface
 type Consensus interface {
-	VerifyBlock(*Block) error
+	VerifyBlock(block *Block, parent *Block) error
+	FastVerifyBlock(block *Block) error
 }
