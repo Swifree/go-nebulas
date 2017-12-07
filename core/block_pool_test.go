@@ -66,9 +66,11 @@ func TestBlockPool(t *testing.T) {
 	bc.tailBlock.commit()
 	bc.storeBlockToStorage(bc.tailBlock)
 
-	validators, _ := TraverseDynasty(bc.tailBlock.dposContext.dynastyTrie)
+	validators, err := TraverseDynasty(bc.tailBlock.dposContext.dynastyTrie)
+	assert.Nil(t, err)
 
-	block0, _ := NewBlock(0, &Address{validators[1]}, bc.tailBlock)
+	block0, err := NewBlock(0, &Address{validators[1]}, bc.tailBlock)
+	assert.Nil(t, err)
 	block0.header.timestamp = bc.tailBlock.header.timestamp + BlockInterval
 	block0.Seal()
 
