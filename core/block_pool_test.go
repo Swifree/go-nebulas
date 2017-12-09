@@ -36,9 +36,11 @@ type MockConsensus struct {
 }
 
 func (c MockConsensus) FastVerifyBlock(block *Block) error {
+	block.miner = block.Coinbase()
 	return nil
 }
 func (c MockConsensus) VerifyBlock(block *Block, parent *Block) error {
+	block.miner = block.Coinbase()
 	return nil
 }
 
@@ -69,9 +71,11 @@ func TestBlockPool(t *testing.T) {
 	validators, err := TraverseDynasty(bc.tailBlock.dposContext.dynastyTrie)
 	assert.Nil(t, err)
 
-	block0, err := NewBlock(0, &Address{validators[1]}, bc.tailBlock)
+	addr := &Address{validators[1]}
+	block0, err := NewBlock(0, addr, bc.tailBlock)
 	assert.Nil(t, err)
 	block0.header.timestamp = bc.tailBlock.header.timestamp + BlockInterval
+	block0.SetMiner(addr)
 	block0.Seal()
 
 	tx1 := NewTransaction(0, from, to, util.NewUint128FromInt(1), 1, TxPayloadBinaryType, []byte("nas"), TransactionGasPrice, util.NewUint128FromInt(200000))
@@ -87,24 +91,32 @@ func TestBlockPool(t *testing.T) {
 	err = bc.txPool.Push(tx3)
 	assert.NoError(t, err)
 
-	block1, _ := NewBlock(0, &Address{validators[2]}, block0)
+	addr = &Address{validators[2]}
+	block1, _ := NewBlock(0, addr, block0)
 	block1.header.timestamp = block0.header.timestamp + BlockInterval
 	block1.CollectTransactions(1)
+	block1.SetMiner(addr)
 	block1.Seal()
 
-	block2, _ := NewBlock(0, &Address{validators[3]}, block1)
+	addr = &Address{validators[3]}
+	block2, _ := NewBlock(0, addr, block1)
 	block2.header.timestamp = block1.header.timestamp + BlockInterval
 	block2.CollectTransactions(1)
+	block2.SetMiner(addr)
 	block2.Seal()
 
-	block3, _ := NewBlock(0, &Address{validators[4]}, block2)
+	addr = &Address{validators[4]}
+	block3, _ := NewBlock(0, addr, block2)
 	block3.header.timestamp = block2.header.timestamp + BlockInterval
 	block3.CollectTransactions(1)
+	block3.SetMiner(addr)
 	block3.Seal()
 
-	block4, _ := NewBlock(0, &Address{validators[5]}, block3)
+	addr = &Address{validators[5]}
+	block4, _ := NewBlock(0, addr, block3)
 	block4.header.timestamp = block3.header.timestamp + BlockInterval
 	block4.CollectTransactions(1)
+	block4.SetMiner(addr)
 	block4.Seal()
 
 	err = pool.Push(block0)

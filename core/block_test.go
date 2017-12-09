@@ -251,6 +251,7 @@ func TestBlock_CollectTransactions(t *testing.T) {
 
 	block0, _ := NewBlock(0, from, tail)
 	block0.header.timestamp = BlockInterval
+	block0.SetMiner(from)
 	block0.Seal()
 	//bc.BlockPool().push(block0)
 	bc.SetTailBlock(block0)
@@ -287,6 +288,7 @@ func TestBlock_CollectTransactions(t *testing.T) {
 	assert.Equal(t, block.Sealed(), false)
 	balance := block.GetBalance(block.header.coinbase.address)
 	assert.Equal(t, balance.Cmp(util.NewUint128().Int), 0)
+	block.SetMiner(coinbase)
 	block.Seal()
 	assert.Equal(t, block.Sealed(), true)
 	assert.Equal(t, block.transactions[0], tx1)
@@ -298,6 +300,7 @@ func TestBlock_CollectTransactions(t *testing.T) {
 	// mock net message
 	block, _ = mockBlockFromNetwork(block)
 	assert.Equal(t, block.LinkParentBlock(bc.tailBlock), true)
+	block.SetMiner(coinbase)
 	assert.Nil(t, block.Verify(0))
 }
 
@@ -327,6 +330,7 @@ func TestBlock_DposCandidates(t *testing.T) {
 
 	block0, _ := NewBlock(0, from, tail)
 	block0.header.timestamp = BlockInterval
+	block0.SetMiner(from)
 	block0.Seal()
 	bc.SetTailBlock(block0)
 
@@ -346,9 +350,11 @@ func TestBlock_DposCandidates(t *testing.T) {
 	block.CollectTransactions(2)
 	assert.Equal(t, len(block.transactions), 2)
 	assert.Equal(t, block.txPool.cache.Len(), 0)
+	block.SetMiner(coinbase)
 	assert.Equal(t, block.Seal(), nil)
 	block, _ = mockBlockFromNetwork(block)
 	assert.Equal(t, block.LinkParentBlock(bc.tailBlock), true)
+	block.SetMiner(coinbase)
 	assert.Nil(t, block.Verify(0))
 	bytes, _ = block.dposContext.candidateTrie.Get(from.Bytes())
 	assert.Equal(t, bytes, from.Bytes())
@@ -370,9 +376,11 @@ func TestBlock_DposCandidates(t *testing.T) {
 	block.CollectTransactions(1)
 	assert.Equal(t, len(block.transactions), 1)
 	assert.Equal(t, block.txPool.cache.Len(), 0)
+	block.SetMiner(coinbase)
 	assert.Equal(t, block.Seal(), nil)
 	block, _ = mockBlockFromNetwork(block)
 	assert.Equal(t, block.LinkParentBlock(bc.tailBlock), true)
+	block.SetMiner(coinbase)
 	assert.Nil(t, block.Verify(0))
 	_, err := block.dposContext.candidateTrie.Get(from.Bytes())
 	assert.Equal(t, err, nil)
@@ -398,9 +406,11 @@ func TestBlock_DposCandidates(t *testing.T) {
 	block.CollectTransactions(2)
 	assert.Equal(t, len(block.transactions), 2)
 	assert.Equal(t, block.txPool.cache.Len(), 0)
+	block.SetMiner(coinbase)
 	assert.Equal(t, block.Seal(), nil)
 	block, _ = mockBlockFromNetwork(block)
 	assert.Equal(t, block.LinkParentBlock(bc.tailBlock), true)
+	block.SetMiner(coinbase)
 	assert.Nil(t, block.Verify(0))
 	_, err = block.dposContext.candidateTrie.Get(from.Bytes())
 	assert.Equal(t, err, storage.ErrKeyNotFound)
