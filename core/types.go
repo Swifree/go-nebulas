@@ -59,6 +59,7 @@ var (
 	ErrDoubleSealBlock                   = errors.New("cannot seal a block twice")
 	ErrInvalidDelegateToNonCandidate     = errors.New("cannot delegate to non-candidate")
 	ErrInvalidUnDelegateFromNonDelegatee = errors.New("cannot un-delegate from non-delegatee")
+	ErrInvalidBaseAndNextDynastyID       = errors.New("cannot kickout from baseDynastyID to nextDynastyID if nextDynastyID <= baseDynastyID")
 )
 
 // TxPayload stored in tx

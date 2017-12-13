@@ -216,7 +216,7 @@ func (m *Manager) startMsgHandle() {
 				ancestor, err := m.blockChain.FindCommonAncestorWithTail(tail.block)
 				var emptyblocks []*core.Block
 				if err != nil {
-					log.Warn("StartMsgHandle.receiveTailCh: find common ancestor with tail occurs error, ", err)
+					log.Warn("StartMsgHandle.receiveTailCh: find common ancestor with tail occurs error, ", err, "block", tail.block)
 					netblocks := NewNetBlocks(key, tail.nonce, emptyblocks)
 					m.ns.SendSyncReply(tail.from, netblocks)
 					continue
