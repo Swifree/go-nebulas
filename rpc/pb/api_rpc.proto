@@ -132,7 +132,7 @@ service APIService {
         };
     }
 
-    // SignTransaction sign transaction
+    // Sign sign transaction
     rpc SignTransaction(SignTransactionRequest) returns (SignTransactionResponse) {
         option (google.api.http) = {
             post: "/v1/admin/sign"
@@ -428,11 +428,11 @@ message SignTransactionRequest {
     // Transaction nonce.
     uint64 nonce = 4;
 
-    // contract source code.
-    string source = 5;
+    // payload type.
+    string payload_type = 5;
 
-    // the params of contract.
-    string args = 6;
+    // payload data.
+    bytes payload_data = 6;
 
     // gasPrice sending with this transaction.
     string gas_price = 7; // uint128, len=16

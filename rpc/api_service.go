@@ -378,7 +378,7 @@ func (s *APIService) LockAccount(ctx context.Context, req *rpcpb.LockAccountRequ
 // SignTransaction sign transaction with the from addr passphrase
 func (s *APIService) SignTransaction(ctx context.Context, req *rpcpb.SignTransactionRequest) (*rpcpb.SignTransactionResponse, error) {
 	neb := s.server.Neblet()
-	tx, err := parseTransaction(neb, req.From, req.To, req.Value, req.Nonce, core.TxPayloadBinaryType, nil, req.GasPrice, req.GasLimit)
+	tx, err := parseTransaction(neb, req.From, req.To, req.Value, req.Nonce, req.PayloadType, req.PayloadData, req.GasPrice, req.GasLimit)
 	if err != nil {
 		return nil, err
 	}
