@@ -19,9 +19,17 @@
 package net
 
 import (
+	"fmt"
 	"sync"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/nebulasio/go-nebulas/util/logging"
+	metrics "github.com/rcrowley/go-metrics"
+)
+
+// Metrics map for different in/out network msg types
+var (
+	PacketsInByTypes  = new(sync.Map)
+	PacketsOutByTypes = new(sync.Map)
 )
 
 // Dispatcher a message dispatcher service.
@@ -44,9 +52,10 @@ func NewDispatcher() *Dispatcher {
 
 // Register register subscribers.
 func (dp *Dispatcher) Register(subscribers ...*Subscriber) {
-
 	for _, v := range subscribers {
 		for _, mt := range v.msgTypes {
+			PacketsInByTypes.LoadOrStore(mt, metrics.GetOrRegisterMeter(fmt.Sprintf("neb.net.packets.in.%s", mt), nil))
+			PacketsOutByTypes.LoadOrStore(mt, metrics.GetOrRegisterMeter(fmt.Sprintf("neb.net.packets.out.%s", mt), nil))
 			m, _ := dp.subscribersMap.LoadOrStore(mt, new(sync.Map))
 			m.(*sync.Map).Store(v, true)
 		}
@@ -70,18 +79,17 @@ func (dp *Dispatcher) Deregister(subscribers ...*Subscriber) {
 
 // Start start message dispatch goroutine.
 func (dp *Dispatcher) Start() {
+	logging.CLog().Info("Launched Dispatcher.")
+
 	go (func() {
-		count := 0
 		for {
-			// log.Info("dispatcher in loop")
+			// logging.VLog().Info("dispatcher in loop")
 			select {
 			case <-dp.quitCh:
-				log.Info("dispatcher.loop: dispatcher is stopped.")
+				logging.CLog().Info("Shutdowned Dispatcher.")
 				return
 
 			case msg := <-dp.receivedMessageCh:
-				count++
-				log.Info("dispatcher.loop: recvMsgCount=%d", count)
 				msgType := msg.MessageType()
 				v, _ := dp.subscribersMap.Load(msgType)
 				m, _ := v.(*sync.Map)

@@ -22,7 +22,8 @@ import (
 	"encoding/json"
 
 	"github.com/nebulasio/go-nebulas/util"
-	log "github.com/sirupsen/logrus"
+	"github.com/nebulasio/go-nebulas/util/logging"
+	"github.com/sirupsen/logrus"
 )
 
 // Candidate Action
@@ -70,22 +71,20 @@ func (payload *CandidatePayload) Execute(ctx *PayloadContext) (*util.Uint128, er
 		if _, err := ctx.dposContext.candidateTrie.Put(candidate, candidate); err != nil {
 			return ZeroGasCount, err
 		}
-		log.WithFields(log.Fields{
-			"func":      "Payload.Candidate",
+		logging.VLog().WithFields(logrus.Fields{
 			"block":     ctx.block,
 			"tx":        ctx.tx,
 			"candidate": ctx.tx.from.String(),
-		}).Info("Candidate Login.")
+		}).Info("Candidate login.")
 	case LogoutAction:
 		if err := ctx.dposContext.kickoutCandidate(candidate); err != nil {
 			return ZeroGasCount, err
 		}
-		log.WithFields(log.Fields{
-			"func":      "Payload.Candidate",
+		logging.VLog().WithFields(logrus.Fields{
 			"block":     ctx.block,
 			"tx":        ctx.tx,
 			"candidate": ctx.tx.from.String(),
-		}).Info("Candidate Logout.")
+		}).Info("Candidate logout.")
 	default:
 		return ZeroGasCount, ErrInvalidCandidatePayloadAction
 	}

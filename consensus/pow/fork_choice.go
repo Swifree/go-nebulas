@@ -19,7 +19,8 @@
 package pow
 
 import (
-	log "github.com/sirupsen/logrus"
+	"github.com/nebulasio/go-nebulas/util/logging"
+	"github.com/sirupsen/logrus"
 )
 
 // ForkChoice Rule of PoW Consensus
@@ -28,11 +29,6 @@ func (p *Pow) ForkChoice() {
 	bc := p.chain
 	tailBlock := bc.TailBlock()
 	detachedTailBlocks := bc.DetachedTailBlocks()
-
-	// find the max depth.
-	log.WithFields(log.Fields{
-		"func": "Pow.ForkChoice",
-	}).Debug("find the highest tail.")
 
 	newTailBlock := tailBlock
 	maxHeight := tailBlock.Height()
@@ -47,18 +43,20 @@ func (p *Pow) ForkChoice() {
 	}
 
 	if newTailBlock == bc.TailBlock() {
-		log.WithFields(log.Fields{
-			"func": "Pow.ForkChoice",
-		}).Info("current tail is the highest, no change.")
+		logging.CLog().Info("Current tail is the best, no need to change it.")
 	} else {
-		log.WithFields(log.Fields{
-			"func":      "Pow.ForkChoice",
-			"maxHeight": maxHeight,
-			"tailBlock": newTailBlock,
-		}).Info("change to new tail.")
-		bc.SetTailBlock(newTailBlock)
+		err := bc.SetTailBlock(newTailBlock)
+		if err != nil {
+			logging.CLog().WithFields(logrus.Fields{
+				"maxHeight": maxHeight,
+				"tailBlock": newTailBlock,
+				"err":       err,
+			}).Error("Failed to set tail block.")
+		} else {
+			logging.CLog().WithFields(logrus.Fields{
+				"maxHeight": maxHeight,
+				"tailBlock": newTailBlock,
+			}).Info("Succeed to change to new tail.")
+		}
 	}
-
-	// dump chain.
-	// log.Debug("Dump: ", bc.Dump())
 }

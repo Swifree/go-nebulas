@@ -29,18 +29,7 @@ import (
 
 	"github.com/nebulasio/go-nebulas/neblet"
 	"github.com/nebulasio/go-nebulas/util/logging"
-	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
-)
-
-// const
-const (
-	PanicLevel = "panic"
-	FatalLevel = "fatal"
-	ErrorLevel = "error"
-	WarnLevel  = "warn"
-	InfoLevel  = "info"
-	DebugLevel = "debug"
 )
 
 var (
@@ -88,42 +77,16 @@ func main() {
 }
 
 func neb(ctx *cli.Context) error {
-	logging.EnableFuncNameLogger()
-
 	n, err := makeNeb(ctx)
 	if err != nil {
 		return err
 	}
 
-	if n.Config().App.EnableCrashReport {
-		InitCrashReporter()
-	}
+	logging.Init(n.Config().App.LogFile, n.Config().App.LogLevel)
 
-	err = logging.EnableFileLogger(n.Config().App.LogFile)
-	if err != nil {
-		return err
-	}
-
-	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
-	log.SetOutput(os.Stdout)
-
-	if n.Config().App.LogLevel != "" {
-		switch n.Config().App.LogLevel {
-		case PanicLevel:
-			log.SetLevel(log.PanicLevel)
-		case FatalLevel:
-			log.SetLevel(log.FatalLevel)
-		case ErrorLevel:
-			log.SetLevel(log.ErrorLevel)
-		case WarnLevel:
-			log.SetLevel(log.WarnLevel)
-		case InfoLevel:
-			log.SetLevel(log.InfoLevel)
-		case DebugLevel:
-			log.SetLevel(log.DebugLevel)
-		default:
-			log.SetLevel(log.InfoLevel)
-		}
+	// enable crash report if open the switch and configure the url
+	if n.Config().App.EnableCrashReport && len(n.Config().App.CrashReportUrl) > 0 {
+		InitCrashReporter(n.Config().App)
 	}
 
 	runNeb(n)

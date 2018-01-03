@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"log"
 	mrand "math/rand"
 	"time"
 
@@ -16,7 +17,6 @@ import (
 	ps "github.com/libp2p/go-libp2p-peerstore"
 	swarm "github.com/libp2p/go-libp2p-swarm"
 	ma "github.com/multiformats/go-multiaddr"
-	log "github.com/sirupsen/logrus"
 
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	multicodec "github.com/multiformats/go-multicodec"
@@ -39,7 +39,7 @@ type Message struct {
 	HangUp bool
 }
 
-// streamWrap wraps a libp2p stream. We encode/decode whenever we
+// WrappedStream wraps a libp2p stream. We encode/decode whenever we
 // write/read from a stream, so we can just carry the encoders
 // and bufios with us
 type WrappedStream struct {
@@ -50,7 +50,7 @@ type WrappedStream struct {
 	r      *bufio.Reader
 }
 
-// wrapStream takes a stream and complements it with r/w bufios and
+// WrapStream takes a stream and complements it with r/w bufios and
 // decoder/encoder. In order to write raw data to the stream we can use
 // wrap.w.Write(). To encode something into it we can wrap.enc.Encode().
 // Finally, we should wrap.w.Flush() to actually send the data. Handling

@@ -19,9 +19,9 @@
 package core
 
 import (
-	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gogo/protobuf/proto"
 	lru "github.com/hashicorp/golang-lru"
@@ -29,8 +29,9 @@ import (
 	"github.com/nebulasio/go-nebulas/storage"
 	"github.com/nebulasio/go-nebulas/util"
 	"github.com/nebulasio/go-nebulas/util/byteutils"
+	"github.com/nebulasio/go-nebulas/util/logging"
 	metrics "github.com/rcrowley/go-metrics"
-	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 )
 
 // BlockChain the BlockChain core type.
@@ -67,10 +68,12 @@ const (
 )
 
 var (
-	blockHeightGauge      = metrics.GetOrRegisterGauge("block_height", nil)
-	blocktailHashGauge    = metrics.GetOrRegisterGauge("blocktail_hash", nil)
-	blockRevertTimesGauge = metrics.GetOrRegisterGauge("block_revert_count", nil)
-	blockRevertMeter      = metrics.GetOrRegisterMeter("block_revert", nil)
+	blockHeightGauge      = metrics.GetOrRegisterGauge("neb.block.height", nil)
+	blocktailHashGauge    = metrics.GetOrRegisterGauge("neb.block.tailhash", nil)
+	blockRevertTimesGauge = metrics.GetOrRegisterGauge("neb.block.revertcount", nil)
+	blockRevertMeter      = metrics.GetOrRegisterMeter("neb.block.revert", nil)
+	blockOnchainTimer     = metrics.GetOrRegisterTimer("neb.block.onchain", nil)
+	txOnchainTimer        = metrics.GetOrRegisterTimer("neb.tx.onchain", nil)
 )
 
 // NewBlockChain create new #BlockChain instance.
@@ -101,11 +104,23 @@ func NewBlockChain(neb Neblet) (*BlockChain, error) {
 	if err != nil {
 		return nil, err
 	}
+	genesisConf, err := DumpGenesis(bc.storage)
+	if err != nil {
+		return nil, err
+	}
+	logging.CLog().WithFields(logrus.Fields{
+		"meta.chainid":           genesisConf.Meta.ChainId,
+		"consensus.dpos.dynasty": genesisConf.Consensus.Dpos.Dynasty,
+		"token.distribution":     genesisConf.TokenDistribution,
+	}).Info("Genesis Configuration.")
 
 	bc.tailBlock, err = bc.loadTailFromStorage()
 	if err != nil {
 		return nil, err
 	}
+	logging.CLog().WithFields(logrus.Fields{
+		"block": bc.tailBlock,
+	}).Info("Tail Block.")
 
 	bc.bkPool.setBlockChain(bc)
 	bc.txPool.setBlockChain(bc)
@@ -190,9 +205,10 @@ func hashToInt64(hash string) (int64, error) {
 	var s int64
 	var err error
 	if s, err = strconv.ParseInt(h, 16, 32); err != nil {
-		log.WithFields(log.Fields{
+		logging.VLog().WithFields(logrus.Fields{
 			"hash": hash,
-		}).Error("parseInt error")
+			"err":  err,
+		}).Error("Failed to parseInt")
 		return 0, err
 	}
 	return s, nil
@@ -240,7 +256,7 @@ func (bc *BlockChain) FetchDescendantInCanonicalChain(n int, block *Block) ([]*B
 	curBlock := bc.tailBlock
 	for curBlock != nil && !curBlock.Hash().Equals(block.Hash()) {
 		if CheckGenesisBlock(curBlock) {
-			return nil, errors.New("cannot find the block in canonical chain")
+			return nil, ErrNotBlockInCanonicalChain
 		}
 		curIdx = (curIdx + 1) % n
 		queue[curIdx] = curBlock
@@ -292,6 +308,15 @@ func (bc *BlockChain) putVerifiedNewBlocks(parent *Block, allBlocks, tailBlocks 
 		bc.cachedBlocks.ContainsOrAdd(v.Hash().Hex(), v)
 		if err := bc.storeBlockToStorage(v); err != nil {
 			return err
+		}
+
+		logging.CLog().WithFields(logrus.Fields{
+			"block": v,
+		}).Info("Accepted the new block on chain")
+
+		blockOnchainTimer.Update(time.Duration(time.Now().Unix() - v.Timestamp()))
+		for _, tx := range v.transactions {
+			txOnchainTimer.Update(time.Duration(time.Now().Unix() - tx.Timestamp()))
 		}
 	}
 	for _, v := range tailBlocks {
@@ -402,8 +427,6 @@ func (bc *BlockChain) getAncestorHash(number int) (byteutils.Hash, error) {
 func (bc *BlockChain) Dump(count int) string {
 	rl := []string{}
 	block := bc.tailBlock
-	log.Info("Dump ", count)
-	log.Info("Tail ", bc.tailBlock)
 	rl = append(rl, block.String())
 	for i := 1; i < count; i++ {
 		if !CheckGenesisBlock(block) {
@@ -413,7 +436,6 @@ func (bc *BlockChain) Dump(count int) string {
 	}
 
 	rls := "[" + strings.Join(rl, ",") + "]"
-	log.Info("Blocks ", rls)
 	return rls
 }
 
@@ -459,20 +481,15 @@ func (bc *BlockChain) loadTailFromStorage() (*Block, error) {
 
 func (bc *BlockChain) loadGenesisFromStorage() (*Block, error) {
 	genesis, err := LoadBlockFromStorage(GenesisHash, bc.storage, bc.txPool, bc.eventEmitter)
-	if err == nil {
-		return genesis, nil
-	}
-	if err != storage.ErrKeyNotFound {
-		return nil, err
-	}
-
-	genesis, err = NewGenesisBlock(bc.genesis, bc)
 	if err != nil {
-		return nil, err
-	}
-	if err := bc.storeBlockToStorage(genesis); err != nil {
-		return nil, err
-	}
+		genesis, err = NewGenesisBlock(bc.genesis, bc)
+		if err != nil {
+			return nil, err
+		}
+		if err := bc.storeBlockToStorage(genesis); err != nil {
+			return nil, err
+		}
 
+	}
 	return genesis, nil
 }

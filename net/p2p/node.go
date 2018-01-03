@@ -41,7 +41,8 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/host/basic"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/nebulasio/go-nebulas/common/pdeque"
-	log "github.com/sirupsen/logrus"
+	"github.com/nebulasio/go-nebulas/util/logging"
+	"github.com/sirupsen/logrus"
 )
 
 const letterBytes = "0123456789ABCDEF0123456789ABCDE10123456789ABCDEF0123456789ABCDEF"
@@ -101,12 +102,12 @@ func NewNode(config *Config) (*Node, error) {
 
 	err := node.init()
 	if err != nil {
-		log.Error("start node fail, can not init node", err)
+		logging.VLog().Error("start node fail, can not init node", err)
 		return nil, err
 	}
-	log.WithFields(log.Fields{
+	logging.CLog().WithFields(logrus.Fields{
 		"node.listen": node.config.Listen,
-	}).Debug("node init success")
+	}).Info("node init success")
 	return node, nil
 }
 
@@ -227,9 +228,11 @@ func (node *Node) init() error {
 	)
 
 	node.routeTable.Update(node.id)
+
 	node.stream = new(sync.Map)
 	node.streamCache = pdeque.NewPriorityDeque(less)
 	node.version = node.config.Version
+
 	var multiaddrs []multiaddr.Multiaddr
 	for _, v := range node.config.Listen {
 		tcpAddr, err := net.ResolveTCPAddr("tcp", v)

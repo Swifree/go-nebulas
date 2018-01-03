@@ -38,8 +38,9 @@ import (
 	"github.com/nebulasio/go-nebulas/net/messages"
 	"github.com/nebulasio/go-nebulas/net/pb"
 	byteutils "github.com/nebulasio/go-nebulas/util/byteutils"
+	"github.com/nebulasio/go-nebulas/util/logging"
 	metrics "github.com/rcrowley/go-metrics"
-	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 )
 
 // connection state
@@ -74,8 +75,10 @@ var (
 )
 
 var (
-	packetInFromNet = metrics.GetOrRegisterMeter("packet_in_from_net", nil)
-	packetOut       = metrics.GetOrRegisterMeter("packet_out", nil)
+	packetsIn   = metrics.GetOrRegisterMeter("neb.net.packets.in", nil)
+	packetsOut  = metrics.GetOrRegisterMeter("neb.net.packets.out", nil)
+	netBytesIn  = metrics.GetOrRegisterMeter("neb.net.bytes.in", nil)
+	netBytesOut = metrics.GetOrRegisterMeter("neb.net.bytes.out", nil)
 )
 
 // NetService service for nebulas p2p network
@@ -115,7 +118,7 @@ Protocol In Nebulas, we define our own wire protocol, as the following:
 |                                                               |
 +---------------------------------------------------------------+
 */
-type Protocol struct {
+type NebMessage struct {
 	magicNumber    []byte
 	chainID        []byte
 	version        byte
@@ -123,7 +126,7 @@ type Protocol struct {
 	dataLength     []byte
 	dataChecksum   []byte
 	headerChecksum []byte
-	dataHeader     []byte
+	header         []byte
 	data           []byte
 	reserved       []byte
 }
@@ -133,7 +136,7 @@ func NewNetManager(n Neblet) (*NetService, error) {
 	config := NewP2PConfig(n)
 	node, err := NewNode(config)
 	if err != nil {
-		log.Error("NewNetService: node create fail -> ", err)
+		logging.VLog().Error("NewNetService: node create fail -> ", err)
 		return nil, err
 	}
 	ns := &NetService{node, make(chan bool), net.NewDispatcher()}
@@ -143,7 +146,7 @@ func NewNetManager(n Neblet) (*NetService, error) {
 func (ns *NetService) registerNetManager() *NetService {
 	// register streamHandler to start loop to handle stream origined from remote node.
 	ns.node.host.SetStreamHandler(ProtocolID, ns.streamHandler)
-	log.Debug("RegisterNetService: register netservice success")
+	logging.VLog().Info("RegisterNetService: register netservice success")
 	return ns
 }
 
@@ -163,127 +166,178 @@ func (ns *NetService) Node() *Node {
 }
 
 func (ns *NetService) streamHandler(s libnet.Stream) {
+	var tmpMsg *NebMessage
+	var dataLength uint32
+
+	streamBuffer := []byte{}
+	sdata := make([]byte, 1024)
+
+	node := ns.node
+	pid := s.Conn().RemotePeer()
+	addrs := s.Conn().RemoteMultiaddr()
+	key := pid.Pretty()
+
 	for {
 		select {
 		case <-ns.quitCh:
 			return
 		default:
-			node := ns.node
-			pid := s.Conn().RemotePeer()
-			addrs := s.Conn().RemoteMultiaddr()
-			key := pid.Pretty()
-			protocol, err := ns.parse(s)
+			n, err := s.Read(sdata)
 			if err != nil {
-				log.Error("streamHandler: parse network protocol occurs error, ", err)
+				logging.VLog().WithFields(logrus.Fields{
+					"err":   err,
+					"addrs": addrs,
+				}).Error("Connectoin closed.")
 				ns.Bye(pid, []ma.Multiaddr{addrs}, s, key)
 				return
 			}
+			streamBuffer = append(streamBuffer, sdata[:n]...)
 
-			switch protocol.msgName {
+			if tmpMsg == nil {
+				// wait to parseHeader
+				if len(streamBuffer) < offsetThirtySix {
+					continue
+				}
+				tmpMsg, err = ns.parseMsgHeader(streamBuffer)
+				if err != nil {
+					logging.VLog().WithFields(logrus.Fields{
+						"addrs": addrs.String(),
+						"err":   err,
+					}).Error("parse header error")
+					ns.Bye(pid, []ma.Multiaddr{addrs}, s, key)
+					return
+				}
+
+				streamBuffer = streamBuffer[offsetThirtySix:]
+				dataLength = byteutils.Uint32(tmpMsg.dataLength)
+			}
+
+			if dataLength > uint32(len(streamBuffer)) {
+				// stream data is not enough
+				continue
+			}
+
+			if err = ns.parseMsgData(tmpMsg, streamBuffer); err != nil {
+				logging.VLog().WithFields(logrus.Fields{
+					"addrs": addrs.String(),
+					"err":   err,
+				}).Error("parse data error")
+				ns.Bye(pid, []ma.Multiaddr{addrs}, s, key)
+				return
+			}
+			streamBuffer = streamBuffer[dataLength:]
+
+			msg := tmpMsg
+			tmpMsg = nil
+			dataLength = 0
+
+			packetsIn.Mark(1)
+			netBytesIn.Mark(int64(byteutils.Uint32(msg.dataLength) + uint32(offsetThirtySix)))
+
+			switch msg.msgName {
 			case HELLO:
-				ns.handleHelloMsg(protocol.data, pid, s, addrs, key)
+				ns.handleHelloMsg(msg.data, pid, s, addrs, key)
 			case OK:
-				ns.handleOkMsg(protocol.data, pid, s, addrs, key)
+				ns.handleOkMsg(msg.data, pid, s, addrs, key)
 			case BYE:
 
 			case SyncRoute:
-				ns.handleSyncRouteMsg(protocol.data, pid, s, addrs, key)
+				ns.handleSyncRouteMsg(msg.data, pid, s, addrs, key)
 			case SyncRouteReply:
-				ns.handleSyncRouteReplyMsg(protocol.data, pid, s, addrs)
+				ns.handleSyncRouteReplyMsg(msg.data, pid, s, addrs)
 			case NewHashMsg:
-				ns.handleNewHashMsg(protocol.data, pid)
+				ns.handleNewHashMsg(msg.data, pid)
 			case NetworkID:
-				ns.handleNetworkIDMsg(protocol.data, pid, s)
+				ns.handleNetworkIDMsg(msg.data, pid, s)
 			case NetworkIDReply:
-				ns.handleReNetworkIDMsg(protocol.data, pid)
+				ns.handleReNetworkIDMsg(msg.data, pid)
 			default:
 				var relayness []peer.ID
-				log.WithFields(log.Fields{
-					"msgName": protocol.msgName,
+				logging.VLog().WithFields(logrus.Fields{
+					"msgName": msg.msgName,
 					"pid":     pid.Pretty(),
 				}).Info("receive block & tx message.")
+
+				m, ok := net.PacketsInByTypes.Load(msg.msgName)
+				if ok {
+					m.(metrics.Meter).Mark(1)
+				}
+
 				streamStore, ok := node.stream.Load(key)
 				if !ok {
 					ns.Bye(pid, []ma.Multiaddr{addrs}, s, key)
 					return
 				}
 				if streamStore.(*StreamStore).conn != SOK {
-					log.Error("peer not shake hand before send message.")
+					logging.VLog().Error("peer not shake hand before send message.")
 					ns.Bye(pid, []ma.Multiaddr{addrs}, s, key)
 					return
 				}
-				msg := messages.NewBaseMessage(protocol.msgName, pid.Pretty(), protocol.data)
-				ns.PutMessage(msg)
-				packetInFromNet.Mark(1)
-				peers, exists := node.relayness.Get(byteutils.Uint32(protocol.dataChecksum))
+				ns.PutMessage(messages.NewBaseMessage(msg.msgName, pid.Pretty(), msg.data))
+
+				peers, exists := node.relayness.Get(byteutils.Uint32(msg.dataChecksum))
 				if exists {
 					relayness = peers.([]peer.ID)
 				}
-				node.relayness.Add(byteutils.Uint32(protocol.dataChecksum), append(relayness, pid))
+				node.relayness.Add(byteutils.Uint32(msg.dataChecksum), append(relayness, pid))
 			}
+
 		}
 	}
 
 }
 
-func (ns *NetService) parse(s libnet.Stream) (*Protocol, error) {
+func (ns *NetService) parseMsgHeader(streamBuffer []byte) (*NebMessage, error) {
+	header := streamBuffer
 
-	header, err := ReadBytes(s, uint32(offsetThirtySix))
-	if err != nil {
-		log.Error("parse protocol, read data header occurs error, ", err)
-		return nil, err
-	}
-
-	protocol := &Protocol{}
-	protocol.magicNumber = header[:offsetFour]
-	protocol.chainID = header[offsetFour:offsetEight]
-	protocol.reserved = header[offsetEight:offsetEleven]
-	protocol.version = header[offsetEleven]
+	nebMsg := &NebMessage{}
+	nebMsg.magicNumber = header[:offsetFour]
+	nebMsg.chainID = header[offsetFour:offsetEight]
+	nebMsg.reserved = header[offsetEight:offsetEleven]
+	nebMsg.version = header[offsetEleven]
 	msgName := header[offsetTwelve:offsetTwentyFour]
-	protocol.dataLength = header[offsetTwentyFour:offsetTwentyEight]
-	protocol.dataChecksum = header[offsetTwentyEight:offsetThirtyTwo]
-	protocol.dataHeader = header[:offsetThirtyTwo]
+	nebMsg.dataLength = header[offsetTwentyFour:offsetTwentyEight]
+	nebMsg.dataChecksum = header[offsetTwentyEight:offsetThirtyTwo]
+	nebMsg.headerChecksum = header[offsetThirtyTwo:offsetThirtySix]
+	nebMsg.header = header[:offsetThirtyTwo]
 
 	index := bytes.IndexByte(msgName, 0)
 	if index != -1 {
 		msgNameByte := msgName[0:index]
-		protocol.msgName = string(msgNameByte)
+		nebMsg.msgName = string(msgNameByte)
 	} else {
-		protocol.msgName = string(msgName)
+		nebMsg.msgName = string(msgName)
 	}
 
-	protocol.headerChecksum = header[offsetThirtyTwo:offsetThirtySix]
-
-	if !ns.verifyHeader(protocol) {
-		return nil, errors.New("parse protocol, verify header occurs error")
+	if !ns.verifyHeader(nebMsg) {
+		return nil, errors.New("invalid neb message header")
 	}
 
-	data, err := ReadBytes(s, byteutils.Uint32(protocol.dataLength))
-	if err != nil {
-		log.Error("parse protocol, read data occurs error, ", err)
-		return nil, err
-	}
-	protocol.data = data
+	logging.VLog().WithFields(logrus.Fields{
+		"msgName":      nebMsg.msgName,
+		"magicNumber":  string(nebMsg.magicNumber),
+		"chainID":      byteutils.Uint32(nebMsg.chainID),
+		"version":      nebMsg.version,
+		"dataChecksum": byteutils.Uint32(nebMsg.dataChecksum),
+		"dataLength":   byteutils.Uint32(nebMsg.dataLength),
+	}).Info("parse protocol header data.")
+	return nebMsg, nil
+}
 
-	dataChecksumA := crc32.ChecksumIEEE(data)
-	if dataChecksumA != byteutils.Uint32(protocol.dataChecksum) {
-		log.WithFields(log.Fields{
+func (ns *NetService) parseMsgData(nebMsg *NebMessage, streamBuffer []byte) error {
+
+	dataLength := byteutils.Uint32(nebMsg.dataLength)
+	nebMsg.data = streamBuffer[:dataLength]
+
+	dataChecksumA := crc32.ChecksumIEEE(nebMsg.data)
+	if dataChecksumA != byteutils.Uint32(nebMsg.dataChecksum) {
+		logging.VLog().WithFields(logrus.Fields{
 			"dataChecksumA": dataChecksumA,
-			"dataChecksum":  byteutils.Uint32(protocol.dataChecksum),
-		}).Error("parse protocol, data verification occurs error, dataChecksum is error, the connection will be closed.")
-		return nil, errors.New("parse protocol, data verification occurs error, dataChecksum is error")
+			"dataChecksum":  byteutils.Uint32(nebMsg.dataChecksum),
+		}).Error("invalid neb message data")
+		return errors.New("invalid neb message data")
 	}
-
-	log.WithFields(log.Fields{
-		"msgName":      protocol.msgName,
-		"magicNumber":  string(protocol.magicNumber),
-		"chainID":      byteutils.Uint32(protocol.chainID),
-		"version":      protocol.version,
-		"dataChecksum": byteutils.Uint32(protocol.dataChecksum),
-	}).Debug("parse protocol header data.")
-
-	return protocol, nil
-
+	return nil
 }
 
 func (ns *NetService) handleHelloMsg(data []byte, pid peer.ID, s libnet.Stream, addrs ma.Multiaddr, key string) bool {
@@ -298,15 +352,15 @@ func (ns *NetService) handleHelloMsg(data []byte, pid peer.ID, s libnet.Stream, 
 	hello := new(messages.HelloMessage)
 	pb := new(netpb.Hello)
 	if err := proto.Unmarshal(data, pb); err != nil {
-		log.Error("handle hello msg occurs error: ", err)
+		logging.VLog().Error("handle hello msg occurs error: ", err)
 		return result
 	}
 	if err := hello.FromProto(pb); err != nil {
-		log.Error("handle hello msg occurs error: ", err)
+		logging.VLog().Error("handle hello msg occurs error: ", err)
 		return result
 	}
 
-	log.WithFields(log.Fields{
+	logging.VLog().WithFields(logrus.Fields{
 		"hello.NodeID":  hello.NodeID,
 		"pid":           pid,
 		"addrs":         addrs.String(),
@@ -319,7 +373,7 @@ func (ns *NetService) handleHelloMsg(data []byte, pid peer.ID, s libnet.Stream, 
 		pbok, err := ok.ToProto()
 		okdata, err := proto.Marshal(pbok)
 		if err != nil {
-			log.Error("handleHelloMsg send ok message occurs error, ", err)
+			logging.VLog().Error("handleHelloMsg send ok message occurs error, ", err)
 			return result
 		}
 
@@ -330,13 +384,13 @@ func (ns *NetService) handleHelloMsg(data []byte, pid peer.ID, s libnet.Stream, 
 		)
 
 		if err := ns.sendMsg(OK, okdata, s); err != nil {
-			log.Error("send ok msg occurs error, ", err)
+			logging.VLog().Error("send ok msg occurs error, ", err)
 			return result
 		}
 
 		networkIDData := byteutils.FromUint32(node.Config().NetworkID)
 		if err := ns.sendMsg(NetworkID, networkIDData, s); err != nil {
-			log.Error("send networkID msg occurs error, ", err)
+			logging.VLog().Error("send networkID msg occurs error, ", err)
 			return result
 		}
 
@@ -363,11 +417,11 @@ func (ns *NetService) handleOkMsg(data []byte, pid peer.ID, s libnet.Stream, add
 	ok := new(messages.HelloMessage)
 	pb := new(netpb.Hello)
 	if err := proto.Unmarshal(data, pb); err != nil {
-		log.Error("handle ok msg occurs error: ", err)
+		logging.VLog().Error("handle ok msg occurs error: ", err)
 		return result
 	}
 	if err := ok.FromProto(pb); err != nil {
-		log.Error("handle ok msg occurs error: ", err)
+		logging.VLog().Error("handle ok msg occurs error: ", err)
 		return result
 	}
 
@@ -386,7 +440,7 @@ func (ns *NetService) handleOkMsg(data []byte, pid peer.ID, s libnet.Stream, add
 		return result
 	}
 
-	log.Error("handleOkMsg get incorrect response")
+	logging.VLog().Error("handleOkMsg get incorrect response")
 	return result
 
 }
@@ -398,7 +452,7 @@ func (ns *NetService) handleNetworkIDMsg(data []byte, pid peer.ID, s libnet.Stre
 
 	networkIDData := byteutils.FromUint32(node.Config().NetworkID)
 	if err := ns.sendMsg(NetworkIDReply, networkIDData, s); err != nil {
-		log.Error("send networkID msg occurs error, ", err)
+		logging.VLog().Error("send networkID msg occurs error, ", err)
 	}
 
 }
@@ -432,7 +486,7 @@ func (ns *NetService) handleSyncRouteMsg(data []byte, pid peer.ID, s libnet.Stre
 	for i := range peers {
 		peerInfo := node.peerstore.PeerInfo(peers[i])
 		if len(peerInfo.Addrs) == 0 {
-			log.WithFields(log.Fields{
+			logging.VLog().WithFields(logrus.Fields{
 				"nodeId": peerInfo.ID.Pretty(),
 			}).Warn("node addrs is nil")
 			continue
@@ -444,18 +498,18 @@ func (ns *NetService) handleSyncRouteMsg(data []byte, pid peer.ID, s libnet.Stre
 		peer := messages.NewPeerInfoMessage(peerInfo.ID, addres)
 		peerList = append(peerList, peer)
 	}
-	log.WithFields(log.Fields{
+	logging.VLog().WithFields(logrus.Fields{
 		"remoteId":    pid.Pretty(),
 		"remoteAddrs": addrs,
 		"count":       len(peerList),
-	}).Debug("reply sync route to remote node")
+	}).Info("reply sync route to remote node")
 
 	peersMessage := messages.NewPeersMessage(peerList)
 
 	pb, err := peersMessage.ToProto()
 	data, err = proto.Marshal(pb)
 	if err != nil {
-		log.Error("handleSyncRouteMsg occurs error, ", err)
+		logging.VLog().Error("handleSyncRouteMsg occurs error, ", err)
 		return result
 	}
 
@@ -474,18 +528,18 @@ func (ns *NetService) handleSyncRouteReplyMsg(data []byte, pid peer.ID, s libnet
 	pb := new(netpb.Peers)
 
 	if err := proto.Unmarshal(data, pb); err != nil {
-		log.Error("handleSyncRouteReplyMsg occurs error: ", err)
+		logging.VLog().Error("handleSyncRouteReplyMsg occurs error: ", err)
 		return false
 	}
 	if err := peers.FromProto(pb); err != nil {
-		log.Error("handleSyncRouteReplyMsg occurs error: ", err)
+		logging.VLog().Error("handleSyncRouteReplyMsg occurs error: ", err)
 		return false
 	}
 
 	for i := range peers.Peers() {
 		id := peers.Peers()[i].ID()
 		if node.routeTable.Find(id) != "" || len(peers.Peers()[i].Addrs()) == 0 {
-			log.WithFields(log.Fields{
+			logging.VLog().WithFields(logrus.Fields{
 				"id": id.Pretty(),
 			}).Warn("node is already exist in route table")
 			continue
@@ -496,10 +550,10 @@ func (ns *NetService) handleSyncRouteReplyMsg(data []byte, pid peer.ID, s libnet
 			addres = append(addres, addr)
 		}
 
-		log.WithFields(log.Fields{
+		logging.VLog().WithFields(logrus.Fields{
 			"id":    id.Pretty(),
 			"addrs": addres,
-		}).Debug("discover new node")
+		}).Info("discover new node")
 
 		node.peerstore.AddAddrs(
 			id,
@@ -507,7 +561,7 @@ func (ns *NetService) handleSyncRouteReplyMsg(data []byte, pid peer.ID, s libnet
 			peerstore.ProviderAddrTTL,
 		)
 		if err := ns.Hello(id); err != nil {
-			log.WithFields(log.Fields{
+			logging.VLog().WithFields(logrus.Fields{
 				"id":  id.Pretty(),
 				"err": err,
 			}).Error("say hello to the peer fail")
@@ -519,28 +573,28 @@ func (ns *NetService) handleSyncRouteReplyMsg(data []byte, pid peer.ID, s libnet
 	return true
 }
 
-func (ns *NetService) verifyHeader(protocol *Protocol) bool {
+func (ns *NetService) verifyHeader(nebMsg *NebMessage) bool {
 
 	node := ns.node
-	dataHeaderChecksum := crc32.ChecksumIEEE(protocol.dataHeader)
+	headerChecksum := crc32.ChecksumIEEE(nebMsg.header)
 
-	if !byteutils.Equal(MagicNumber, protocol.magicNumber) {
-		log.Error("verifyHeader: data verification occurs error, magic number is error, the connection will be closed.")
+	if !byteutils.Equal(MagicNumber, nebMsg.magicNumber) {
+		logging.VLog().Debug("verifyHeader: data verification occurs error, magic number is error, the connection will be closed.")
 		return false
 	}
 
-	if node.Config().ChainID != byteutils.Uint32(protocol.chainID) {
-		log.Error("verifyHeader: data verification occurs error, chainID is error, the connection will be closed.")
+	if node.Config().ChainID != byteutils.Uint32(nebMsg.chainID) {
+		logging.VLog().Debug("verifyHeader: data verification occurs error, chainID is error, the connection will be closed.")
 		return false
 	}
 
-	if node.version != protocol.version {
-		log.Error("verifyHeader: data verification occurs error, version is error, the connection will be closed.")
+	if node.version != nebMsg.version {
+		logging.VLog().Debug("verifyHeader: data verification occurs error, version is error, the connection will be closed.")
 		return false
 	}
 
-	if dataHeaderChecksum != byteutils.Uint32(protocol.headerChecksum) {
-		log.Error("verifyHeader: data verification occurs error, dataHeaderChecksum is error, the connection will be closed.")
+	if headerChecksum != byteutils.Uint32(nebMsg.headerChecksum) {
+		logging.VLog().Debug("verifyHeader: data verification occurs error, dataHeaderChecksum is error, the connection will be closed.")
 		return false
 	}
 	return true
@@ -565,16 +619,21 @@ func (ns *NetService) clearPeerStore(pid peer.ID, addrs []ma.Multiaddr) {
 // SendMsg send message to a peer
 func (ns *NetService) sendMsg(msgName string, msg []byte, stream libnet.Stream) error {
 
-	log.WithFields(log.Fields{
+	logging.VLog().WithFields(logrus.Fields{
 		"msgName": msgName,
-	}).Debug("SendMsg: send message to a peer.")
+	}).Info("SendMsg: send message to a peer.")
 	totalData := ns.buildData(msg, msgName)
 
 	if err := Write(stream, totalData); err != nil {
-		log.Error("SendMsg: write data occurs error, ", err)
+		logging.VLog().Error("SendMsg: write data occurs error, ", err)
 		return err
 	}
-	packetOut.Mark(1)
+	packetsOut.Mark(1)
+	m, ok := net.PacketsOutByTypes.Load(msgName)
+	if ok {
+		m.(metrics.Meter).Mark(1)
+	}
+	netBytesOut.Mark(int64(len(msg)))
 	return nil
 }
 
@@ -583,28 +642,24 @@ func (ns *NetService) SendMsg(msgName string, msg []byte, target string) error {
 
 	node := ns.node
 	if msgName != NetworkID && !ns.checkNetworkID(target) {
-		log.Warn("can not send message, target node is not in the same network ", target)
+		logging.VLog().Warn("can not send message, target node is not in the same network ", target)
 		return errors.New("can not send message, target node is not in the same network")
 	}
 	streamStore, ok := node.stream.Load(target)
 	if !ok {
 		return errors.New("handleSyncRouteMsg occrus error, stream does not exist")
 	}
-	if err := ns.sendMsg(msgName, msg, streamStore.(*StreamStore).stream); err != nil {
-		return err
-	}
-	packetOut.Mark(1)
-	return nil
+	return ns.sendMsg(msgName, msg, streamStore.(*StreamStore).stream)
 }
 
 func (ns *NetService) checkNetworkID(target string) bool {
 	node := ns.node
 	targetNetworkID, ok := node.networkIDCache.Get(target)
 	if ok {
-		log.WithFields(log.Fields{
+		logging.VLog().WithFields(logrus.Fields{
 			"targetNetworkID": targetNetworkID,
 			"result":          node.config.NetworkID & targetNetworkID.(uint32),
-		}).Debug("checkNetworkID.")
+		}).Info("checkNetworkID.")
 		if node.config.NetworkID&targetNetworkID.(uint32) > 0 {
 			return true
 		}
@@ -644,13 +699,13 @@ func (ns *NetService) SyncRoutes(pid peer.ID) {
 	node := ns.node
 	addrs := node.peerstore.PeerInfo(pid).Addrs
 	if len(addrs) == 0 {
-		log.Error("SyncRoutes: wrong pid addrs")
+		logging.VLog().Error("SyncRoutes: wrong pid addrs")
 		ns.clearPeerStore(pid, addrs)
 		return
 	}
 	data := []byte{}
 	if err := ns.SendMsg(SyncRoute, data, pid.Pretty()); err != nil {
-		log.Error("SyncRoutes: write data occurs error, ", err)
+		logging.VLog().Error("SyncRoutes: write data occurs error, ", err)
 		ns.clearPeerStore(pid, addrs)
 		return
 	}
@@ -721,7 +776,7 @@ func (ns *NetService) PutMessage(msg net.Message) {
 func (ns *NetService) start() error {
 
 	node := ns.node
-	log.WithFields(log.Fields{
+	logging.CLog().WithFields(logrus.Fields{
 		"id":    node.ID(),
 		"addrs": node.host.Addrs(),
 	}).Info("node start")
@@ -741,9 +796,9 @@ func (ns *NetService) start() error {
 			defer wg.Done()
 			err := ns.SayHello(bootNode)
 			if err != nil {
-				log.Error("net.start: can not say hello to trusted node.", bootNode, err)
+				logging.VLog().Error("net.start: can not say hello to trusted node.", bootNode, err)
 			} else {
-				log.Debug("net.start: say hello to trusted node.", bootNode)
+				logging.CLog().Info("net.start: say hello to trusted node.", bootNode)
 				success = true
 			}
 
@@ -754,9 +809,9 @@ func (ns *NetService) start() error {
 	if success || len(node.Config().BootNodes) == 0 {
 		go ns.discovery(node.context)
 		go ns.manageStreamStore()
-		log.Infof("net.start: node start and join to p2p network success and listening for connections on %s... ", node.config.Listen)
+		logging.CLog().Infof("net.start: node start and join to p2p network success and listening for connections on %s... ", node.config.Listen)
 	} else {
-		log.Error("net.start: node start occurs error, say hello to bootNode fail")
+		logging.VLog().Error("net.start: node start occurs error, say hello to bootNode fail")
 		return errors.New("net.start: node start occurs error, say hello to bootNode fail")
 	}
 	return nil
@@ -836,7 +891,7 @@ func (ns *NetService) SayHello(bootNode ma.Multiaddr) error {
 	node := ns.node
 	bootAddr, bootID, err := parseAddressFromMultiaddr(bootNode)
 	if err != nil {
-		log.WithFields(log.Fields{
+		logging.VLog().WithFields(logrus.Fields{
 			"bootNode": bootNode,
 			"error":    err,
 		}).Error("parse Address from trustedNode failed")
@@ -850,15 +905,15 @@ func (ns *NetService) SayHello(bootNode ma.Multiaddr) error {
 	)
 	if node.host.Addrs()[0].String() != bootAddr.String() {
 		if err := ns.Hello(bootID); err != nil {
-			log.WithFields(log.Fields{
+			logging.VLog().WithFields(logrus.Fields{
 				"bootNode": bootNode,
 				"error":    err,
 			}).Error("say hello to bootNode failed")
 			return errors.New("say hello to bootNode failed")
 		}
-		log.WithFields(log.Fields{
+		logging.CLog().WithFields(logrus.Fields{
 			"bootNode": bootNode,
-		}).Debug("say hello to a node success")
+		}).Info("say hello to a node success")
 		node.peerstore.AddAddr(
 			bootID,
 			bootAddr,

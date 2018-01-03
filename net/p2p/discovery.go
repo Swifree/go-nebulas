@@ -26,7 +26,7 @@ import (
 
 	"github.com/libp2p/go-libp2p-peer"
 	ma "github.com/multiformats/go-multiaddr"
-	log "github.com/sirupsen/logrus"
+	"github.com/nebulasio/go-nebulas/util/logging"
 )
 
 /*
@@ -38,13 +38,14 @@ func (net *NetService) discovery(ctx context.Context) {
 	//FIXME  the sync routing table rate can be dynamic
 	interval := 10 * time.Second
 	ticker := time.NewTicker(interval)
+	time.Sleep(1 * time.Second)
 	net.syncRoutingTable()
 	for {
 		select {
 		case <-ticker.C:
 			net.syncRoutingTable()
 		case <-net.quitCh:
-			log.Info("discovery service halting")
+			logging.VLog().Info("discovery service halting")
 			return
 		}
 	}
@@ -80,7 +81,7 @@ func (net *NetService) syncRoutingTable() {
 				defer wg.Done()
 				err := net.SayHello(bootNode)
 				if err != nil {
-					log.Error("net.start: can not say hello to trusted node.", bootNode, err)
+					logging.VLog().Error("net.start: can not say hello to trusted node.", bootNode, err)
 				}
 
 			}(bootNode)

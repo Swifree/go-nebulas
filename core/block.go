@@ -30,7 +30,8 @@ import (
 	"github.com/nebulasio/go-nebulas/common/trie"
 	"github.com/nebulasio/go-nebulas/core/pb"
 	"github.com/nebulasio/go-nebulas/core/state"
-	log "github.com/sirupsen/logrus"
+	"github.com/nebulasio/go-nebulas/util/logging"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/nebulasio/go-nebulas/storage"
@@ -105,7 +106,7 @@ func (b *BlockHeader) FromProto(msg proto.Message) error {
 		b.sign = msg.Sign
 		return nil
 	}
-	return errors.New("Pb Message cannot be converted into BlockHeader")
+	return errors.New("Protobuf message cannot be converted into BlockHeader")
 }
 
 // Block structure
@@ -140,7 +141,7 @@ func (block *Block) ToProto() (proto.Message, error) {
 			if tx, ok := tx.(*corepb.Transaction); ok {
 				txs = append(txs, tx)
 			} else {
-				return nil, errors.New("Pb Message cannot be converted into Transaction")
+				return nil, errors.New("Protobuf message cannot be converted into Transaction")
 			}
 		}
 		return &corepb.Block{
@@ -149,7 +150,7 @@ func (block *Block) ToProto() (proto.Message, error) {
 			Height:       block.height,
 		}, nil
 	}
-	return nil, errors.New("Pb Message cannot be converted into BlockHeader")
+	return nil, errors.New("Protobuf message cannot be converted into BlockHeader")
 }
 
 // FromProto converts proto Block to domain Block
@@ -169,7 +170,7 @@ func (block *Block) FromProto(msg proto.Message) error {
 		block.height = msg.Height
 		return nil
 	}
-	return errors.New("Pb Message cannot be converted into Block")
+	return errors.New("Protobuf message cannot be converted into Block")
 }
 
 // SerializeTxByHash returns tx serialized bytes
@@ -272,7 +273,10 @@ func (block *Block) Nonce() uint64 {
 // SetNonce set nonce.
 func (block *Block) SetNonce(nonce uint64) {
 	if block.sealed {
-		panic("Sealed block can't be changed.")
+		logging.VLog().WithFields(logrus.Fields{
+			"block": block,
+		}).Error("Sealed block can't be changed.")
+		return
 	}
 	block.header.nonce = nonce
 }
@@ -285,7 +289,10 @@ func (block *Block) Timestamp() int64 {
 // SetTimestamp set timestamp
 func (block *Block) SetTimestamp(timestamp int64) {
 	if block.sealed {
-		panic("Sealed block can't be changed.")
+		logging.VLog().WithFields(logrus.Fields{
+			"block": block,
+		}).Error("Sealed block can't be changed.")
+		return
 	}
 	block.header.timestamp = timestamp
 }
@@ -346,12 +353,7 @@ func (block *Block) ParentBlock() (*Block, error) {
 	}
 	parentBlock, err := LoadBlockFromStorage(block.ParentHash(), block.storage, block.txPool, block.eventEmitter)
 	if err != nil {
-		log.WithFields(log.Fields{
-			"func":  "block.ParentBlock",
-			"block": block,
-			"err":   err,
-		}).Error("cannot find the parent block.")
-		return nil, err
+		return nil, ErrMissingParentBlock
 	}
 	return parentBlock, nil
 }
@@ -385,58 +387,41 @@ func (block *Block) LinkParentBlock(parentBlock *Block) error {
 
 	var err error
 	if block.accState, err = parentBlock.accState.Clone(); err != nil {
-		log.WithFields(log.Fields{
-			"func":  "block.LinkParentBlock",
-			"block": parentBlock,
-			"err":   err,
-		}).Error("cannot clone account state.")
-		return err
+		return ErrCloneAccountState
 	}
 	if block.txsTrie, err = parentBlock.txsTrie.Clone(); err != nil {
-		log.WithFields(log.Fields{
-			"func":  "block.LinkParentBlock",
-			"block": parentBlock,
-			"err":   err,
-		}).Error("cannot clone txs state.")
-		return err
+		return ErrCloneTxsState
 	}
 	if block.eventsTrie, err = parentBlock.eventsTrie.Clone(); err != nil {
-		log.WithFields(log.Fields{
-			"func":  "block.LinkParentBlock",
-			"block": parentBlock,
-			"err":   err,
-		}).Error("cannot clone events state.")
-		return err
+		return ErrCloneEventsState
 	}
+
 	elapsedSecond := block.Timestamp() - parentBlock.Timestamp()
 	context, err := parentBlock.NextDynastyContext(elapsedSecond)
 	if err != nil {
-		log.WithFields(log.Fields{
-			"func":  "block.LinkParentBlock",
-			"block": parentBlock,
-			"err":   err,
-		}).Error("cannot generate next dynasty context.")
-		return err
+		return ErrGenerateNextDynastyContext
 	}
 	if err := block.LoadDynastyContext(context); err != nil {
-		log.WithFields(log.Fields{
-			"func":  "block.LinkParentBlock",
-			"block": parentBlock,
-			"err":   err,
-		}).Error("cannot load next dynasty context.")
-		return err
+		return ErrLoadNextDynastyContext
 	}
+
 	block.txPool = parentBlock.txPool
 	block.parenetBlock = parentBlock
 	block.storage = parentBlock.storage
 	block.height = parentBlock.height + 1
 	block.eventEmitter = parentBlock.eventEmitter
 
+	logging.VLog().WithFields(logrus.Fields{
+		"parent": parentBlock,
+		"block":  block,
+		"err":    err,
+	}).Info("Linked the parent block.")
+
 	return nil
 }
 
 func (block *Block) begin() {
-	log.Info("Block Begin.")
+	logging.VLog().Info("Block Begin.")
 	block.accState.BeginBatch()
 	block.txsTrie.BeginBatch()
 	block.eventsTrie.BeginBatch()
@@ -448,7 +433,7 @@ func (block *Block) commit() {
 	block.txsTrie.Commit()
 	block.eventsTrie.Commit()
 	block.dposContext.Commit()
-	log.WithFields(log.Fields{
+	logging.VLog().WithFields(logrus.Fields{
 		"block": block,
 	}).Info("Block Commit.")
 }
@@ -458,7 +443,7 @@ func (block *Block) rollback() {
 	block.txsTrie.RollBack()
 	block.eventsTrie.RollBack()
 	block.dposContext.RollBack()
-	log.WithFields(log.Fields{
+	logging.VLog().WithFields(logrus.Fields{
 		"block": block,
 	}).Info("Block RollBack.")
 }
@@ -476,7 +461,10 @@ func (block *Block) ReturnTransactions() {
 // CollectTransactions and add them to block.
 func (block *Block) CollectTransactions(n int) {
 	if block.sealed {
-		panic("Sealed block can't be changed.")
+		logging.VLog().WithFields(logrus.Fields{
+			"block": block,
+		}).Error("Sealed block can't be changed.")
+		return
 	}
 
 	pool := block.txPool
@@ -489,8 +477,7 @@ func (block *Block) CollectTransactions(n int) {
 			givebacks = append(givebacks, tx)
 		}
 		if err == nil {
-			log.WithFields(log.Fields{
-				"func":     "block.CollectionTransactions",
+			logging.VLog().WithFields(logrus.Fields{
 				"block":    block,
 				"tx":       tx,
 				"giveback": giveback,
@@ -499,8 +486,7 @@ func (block *Block) CollectTransactions(n int) {
 			block.transactions = append(block.transactions, tx)
 			n--
 		} else {
-			log.WithFields(log.Fields{
-				"func":     "block.CollectionTransactions",
+			logging.VLog().WithFields(logrus.Fields{
 				"block":    block,
 				"tx":       tx,
 				"err":      err,
@@ -512,12 +498,11 @@ func (block *Block) CollectTransactions(n int) {
 	for _, tx := range givebacks {
 		err := pool.Push(tx)
 		if err != nil {
-			log.WithFields(log.Fields{
-				"func":  "block.CollectionTransactions",
+			logging.VLog().WithFields(logrus.Fields{
 				"block": block,
 				"tx":    tx,
 				"err":   err,
-			}).Error("giveback tx failed.")
+			}).Error("Failed to giveback the tx.")
 		}
 	}
 }
@@ -550,18 +535,18 @@ func (block *Block) Seal() error {
 	block.header.hash = HashBlock(block)
 	block.sealed = true
 
-	log.WithFields(log.Fields{
+	logging.VLog().WithFields(logrus.Fields{
 		"block": block,
-	}).Info("Block Seal.")
+	}).Info("Sealed Block.")
+
 	return nil
 }
 
 func (block *Block) String() string {
-	return fmt.Sprintf("{\"height\":%d, \"hash\":\"%s\", \"parentHash\":\"%s\", \"accState\":\"%s\", \"nonce\":%d, \"timestamp\": %d, \"coinbase\": \"%s\"}",
+	return fmt.Sprintf("{\"height\":%d, \"hash\":\"%s\", \"parentHash\":\"%s\", \"nonce\":%d, \"timestamp\": %d, \"coinbase\": \"%s\"}",
 		block.height,
 		byteutils.Hex(block.header.hash),
 		byteutils.Hex(block.header.parentHash),
-		byteutils.Hex(block.header.stateRoot),
 		block.header.nonce,
 		block.header.timestamp,
 		block.header.coinbase.String(),
@@ -577,10 +562,13 @@ func (block *Block) VerifyExecution(parent *Block, consensus Consensus) error {
 
 	block.begin()
 
+	start := time.Now().Unix()
 	if err := block.execute(); err != nil {
 		block.rollback()
 		return err
 	}
+	end := time.Now().Unix()
+	BlockExecutedTimer.Update(time.Duration(end - start))
 
 	if err := block.verifyState(); err != nil {
 		block.rollback()
@@ -638,24 +626,40 @@ func (block *Block) triggerEvent() {
 func (block *Block) VerifyIntegrity(chainID uint32, consensus Consensus) error {
 	// check ChainID.
 	if block.header.chainID != chainID {
+		logging.VLog().WithFields(logrus.Fields{
+			"expect": chainID,
+			"actual": block.header.chainID,
+		}).Error("Failed to check chainid.")
 		return ErrInvalidChainID
 	}
 
 	// verify block hash.
 	wantedHash := HashBlock(block)
 	if !wantedHash.Equals(block.Hash()) {
+		logging.VLog().WithFields(logrus.Fields{
+			"expect": wantedHash,
+			"actual": block.Hash(),
+		}).Error("Failed to check block's hash.")
 		return ErrInvalidBlockHash
 	}
 
 	// verify transactions integrity.
 	for _, tx := range block.transactions {
 		if err := tx.VerifyIntegrity(block.header.chainID); err != nil {
+			logging.VLog().WithFields(logrus.Fields{
+				"tx":  tx,
+				"err": err,
+			}).Error("Failed to verify tx's integrity.")
 			return err
 		}
 	}
 
 	// verify the block is acceptable by consensus.
 	if err := consensus.FastVerifyBlock(block); err != nil {
+		logging.VLog().WithFields(logrus.Fields{
+			"block": block,
+			"err":   err,
+		}).Error("Failed to fast verify block.")
 		invalidBlockCounter.Inc(1)
 		return err
 	}
@@ -666,8 +670,6 @@ func (block *Block) VerifyIntegrity(chainID uint32, consensus Consensus) error {
 // verifyState return state verify result.
 func (block *Block) verifyState() error {
 	// verify state root.
-	log.Info(block.accState.RootHash())
-	log.Info(block.StateRoot())
 	if !byteutils.Equal(block.accState.RootHash(), block.StateRoot()) {
 		return ErrInvalidBlockStateRoot
 	}
@@ -695,6 +697,7 @@ func (block *Block) execute() error {
 	block.rewardCoinbase()
 
 	for _, tx := range block.transactions {
+		start := time.Now().Unix()
 		giveback, err := block.executeTransaction(tx)
 		if giveback {
 			err := block.txPool.Push(tx)
@@ -705,6 +708,8 @@ func (block *Block) execute() error {
 		if err != nil {
 			return err
 		}
+		end := time.Now().Unix()
+		TxExecutedTimer.Update(time.Duration(end - start))
 	}
 
 	return block.recordMintCnt()
@@ -755,11 +760,11 @@ func (block *Block) recordEvent(txHash byteutils.Hash, event *Event) error {
 	if err != nil {
 		return err
 	}
-	log.WithFields(log.Fields{
+	logging.VLog().WithFields(logrus.Fields{
 		"block": block,
 		"tx":    txHash.Hex(),
 		"event": event,
-	}).Debug("Record Event.")
+	}).Info("Recorded event.")
 	return nil
 }
 
@@ -806,11 +811,11 @@ func (block *Block) recordMintCnt() error {
 	if err != nil {
 		return err
 	}
-	log.WithFields(log.Fields{
+	logging.VLog().WithFields(logrus.Fields{
 		"dynasty": block.Timestamp() / DynastyInterval,
 		"miner":   block.miner.String(),
 		"count":   cnt,
-	}).Debug("Record Mint Count.")
+	}).Info("Recorded the block minted by the miner in the dynasty.")
 	return nil
 }
 
@@ -818,10 +823,10 @@ func (block *Block) rewardCoinbase() {
 	coinbaseAddr := block.header.coinbase.address
 	coinbaseAcc := block.accState.GetOrCreateUserAccount(coinbaseAddr)
 	coinbaseAcc.AddBalance(BlockReward)
-	log.WithFields(log.Fields{
+	logging.VLog().WithFields(logrus.Fields{
 		"coinbase": coinbaseAddr.Hex(),
 		"balance":  coinbaseAcc.Balance().Int64(),
-	}).Debug("Coinbase Reward.")
+	}).Info("Rewarded the coinbase.")
 }
 
 // GetTransaction from txs Trie

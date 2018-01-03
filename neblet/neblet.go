@@ -17,17 +17,22 @@ import (
 	nsync "github.com/nebulasio/go-nebulas/sync"
 	"github.com/nebulasio/go-nebulas/util"
 	"github.com/nebulasio/go-nebulas/util/byteutils"
-	log "github.com/sirupsen/logrus"
+	"github.com/nebulasio/go-nebulas/util/logging"
+	m "github.com/rcrowley/go-metrics"
 )
 
 var (
 	// ErrNebletAlreadyRunning throws when the neblet is already running.
 	ErrNebletAlreadyRunning = errors.New("neblet is already running")
+
+	// ErrIncompatibleStorageSchemeVersion throws when the storage schema has been changed
+	ErrIncompatibleStorageSchemeVersion = errors.New("incompatible storage schema version, pls migrate your storage")
 )
 
 var (
 	storageSchemeVersionKey = []byte("scheme")
 	storageSchemeVersionVal = []byte("0.5.0")
+	nebstartGauge           = m.GetOrRegisterGauge("neb.start", nil)
 )
 
 // Neblet manages ldife cycle of blockchain services.
@@ -77,7 +82,6 @@ func (n *Neblet) Setup() error {
 	//var err error
 	n.netService, err = p2p.NewNetManager(n)
 	if err != nil {
-		log.Error("new NetService occurs error ", err)
 		return err
 	}
 	n.storage, err = storage.NewDiskStorage(n.config.Chain.Datadir)
@@ -85,10 +89,10 @@ func (n *Neblet) Setup() error {
 	if err != nil {
 		return err
 	}
-	if err = n.CheckSchemeVersion(n.storage); err != nil {
+	if err = n.checkSchemeVersion(n.storage); err != nil {
 		return err
 	}
-	n.eventEmitter = core.NewEventEmitter()
+	n.eventEmitter = core.NewEventEmitter(1024)
 	n.blockChain, err = core.NewBlockChain(n)
 	if err != nil {
 		return err
@@ -115,18 +119,22 @@ func (n *Neblet) Setup() error {
 
 // Start starts the services of the neblet.
 func (n *Neblet) Start() error {
-	var err error
 	n.lock.Lock()
 	defer n.lock.Unlock()
-	log.Info("Starting neblet...")
+
+	logging.VLog().Info("Starting neblet...")
 
 	if n.running {
 		return ErrNebletAlreadyRunning
 	}
 	n.running = true
 
+	if n.config.Stats.EnableMetrics {
+		go metrics.Start(n)
+	}
+
 	// start.
-	if err = n.netService.Start(); err != nil {
+	if err := n.netService.Start(); err != nil {
 		return err
 	}
 
@@ -140,10 +148,7 @@ func (n *Neblet) Start() error {
 	n.syncManager.Start()
 	n.consensus.Start()
 
-	if n.config.Stats.EnableMetrics {
-		go metrics.Start(n)
-	}
-
+	nebstartGauge.Update(1)
 	// TODO: error handling
 	return nil
 }
@@ -153,7 +158,7 @@ func (n *Neblet) Stop() error {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
-	log.Info("Stopping neblet...")
+	logging.VLog().Info("Stopping neblet...")
 
 	if n.consensus != nil {
 		n.consensus.Stop()
@@ -241,15 +246,18 @@ func (n *Neblet) NetManager() p2p.Manager {
 	return n.netService
 }
 
-// CheckSchemeVersion checks if the storage scheme version is compatiable
-func (n *Neblet) CheckSchemeVersion(storage storage.Storage) error {
-	version, err := storage.Get(storageSchemeVersionKey)
-	if err != nil {
-		storage.Put(storageSchemeVersionKey, storageSchemeVersionVal)
+// checks if the storage scheme version is compatiable
+func (n *Neblet) checkSchemeVersion(stor storage.Storage) error {
+	version, err := stor.Get(storageSchemeVersionKey)
+	if err != nil && err != storage.ErrKeyNotFound {
+		return err
+	}
+	if err == storage.ErrKeyNotFound {
+		stor.Put(storageSchemeVersionKey, storageSchemeVersionVal)
 		return nil
 	}
 	if !byteutils.Equal(version, storageSchemeVersionVal) {
-		return errors.New("incompatible storage schema version, pls migrate your storage")
+		return ErrIncompatibleStorageSchemeVersion
 	}
 	return nil
 }
